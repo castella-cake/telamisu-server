@@ -2,8 +2,8 @@ const WebSocket = require('ws');
 const net = require("net");
 const crypto = require("crypto");
 const iconv = require("iconv-lite");
-const version = "v0.1.0";
-const { server_hostname, token, telnet_port, channel } = require("./config.json");
+const version = "v0.2.0";
+const { servers, tokens, telnet_port, channel } = require("./config.json");
 
 const logo = `  _____ ___ _      _   __  __ ___ ___ _   _ 
 |_   _| __| |    /_\\ |  \\/  |_ _/ __| | | |
@@ -11,6 +11,10 @@ const logo = `  _____ ___ _      _   __  __ ___ ___ _   _
   |_| |___|____/_/ \\_\\_|  |_|___|___/\\___/ `
 
 const logoforcmd = logo.replace(/\n/g, "\r\n")
+
+let server_select = 1
+let server_hostname = servers[server_select]
+let token = tokens[servers[server_select]]
 
 // 接続時のウェルカムメッセージ用に自身の情報を写す
 let infoFetchbody = JSON.stringify({ "i": token })
