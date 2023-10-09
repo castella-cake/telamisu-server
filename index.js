@@ -5,10 +5,10 @@ const iconv = require("iconv-lite");
 const version = "v0.1.0";
 const { server_hostname, token, telnet_port, channel } = require("./config.json");
 
-const logo = `  __  __ ___ ___  ___  _    ___  _  _ ___ _____ 
-|  \\/  |_ _/ __|/ _ \\| |  |   \\| \\| | __|_   _|
-| |\\/| || |\\__ \\ (_) | |__| |) | .' | _|  | |  
-|_|  |_|___|___/\\___/|____|___/|_|\\_|___| |_|  `
+const logo = `  __  __ ___ ___ ___ _____ ___ _    _  _ ___ _____ 
+|  \\/  |_ _/ __/ __|_   _| __| |  | \\| | __|_   _|
+| |\\/| || |\\__ \\__ \\ | | | _|| |__| .' | _|  | |  
+|_|  |_|___|___/___/ |_| |___|____|_|\\_|___| |_|  `
 
 const logoforcmd = logo.replace(/\n/g, "\r\n")
 
@@ -244,7 +244,7 @@ function processCmd(data, conn) {
                 text = "\r\n中止しました\r\n"
                 isCmdMode = false
             } else if ( data.indexOf("N") !== -1 || data.indexOf("n") !== -1 ) {
-                text = "\r\nWIP\r\n現在ノート編集モードです。\r\nEscを押すと、ノートの送信操作や、公開範囲の変更などを行うことができます。\r\n"
+                text = "\r\nWIP\r\n現在ノート投稿モードです。\r\nEscを押すと、ノートの送信操作や、公開範囲の変更などを行うことができます。\r\n"
                 isNoteMode = true
                 isCmdMode = false
             } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1 ) {
@@ -294,7 +294,7 @@ var server = net
         if ( res ) {
             const userinfo = await getUserInfo()
             const connectedText = logoforcmd + 
-                "\r\nWELCOME TO MISSKEYTELNET! version: " + version + 
+                "\r\nWELCOME TO MISSTELNET! version: " + version + 
                 "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
                 "TELNET(PORT " + telnet_port + ") で接続中です。\r\n\r\n"+ 
                 "ユーザー名 " + userinfo.name + " (@" + userinfo.userName + ") としてログイン中です。\r\n" + 
