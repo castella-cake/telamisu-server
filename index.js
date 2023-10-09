@@ -60,9 +60,36 @@ function createNoteObj(note) {
 function addToNoteArray(noteObj) {
     // タイプがリノートで、テキストが含まれていない ではないならプッシュする
     if ( !(noteObj.type === "renote" && !noteObj.text ) ) {
-        noteArray.push(noteObj)
+        noteArray.unshift(noteObj)
     } else {
         return false 
+    }
+}
+
+function noteObjToDisp(noteObj, noteNum = noteArray.length + 1) {
+    const createdDate = new Date(noteObj.createdAt)
+    if ( noteObj.type === "quote" && noteObj.text && noteObj.renote && noteObj.renote.text ) {
+        // テキストもある、リノートIDもある(引用リノート)
+        return getUserStringFromUserObj(noteObj.user) + " が引用リノートしました: \r\n" + 
+            replaceCrlf(noteObj.text) + "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
+            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
+    } else if ( noteObj.type === "reply" && noteObj.text && noteObj.reply && noteObj.reply.text ) {
+        // テキストはないけどリノートIDがある、リノートのノートもある(リノート)
+        return getUserStringFromUserObj(noteObj.user) + " が返信しました: \r\n" + 
+            replaceCrlf(noteObj.text) + "\r\nRE(" + getUserStringFromUserObj(noteObj.reply.user, true) + "): \r\n" + replaceCrlf(noteObj.reply.text) +
+            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
+    } else if ( noteObj.type === "note" && noteObj.text ) {
+        // テキストがある(ノート)
+        return getUserStringFromUserObj(noteObj.user) + " がノートしました: \r\n" + 
+            replaceCrlf(noteObj.text) +
+            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
+    } else if ( noteObj.type === "renote" && noteObj.renote && noteObj.renote.text) {
+        // テキストはないけどリノートのノートがある(リノート)
+        return getUserStringFromUserObj(noteObj.user) + " がリノートしました: " + 
+            "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
+            "\r\n" + createdDate.toLocaleString('ja-JP');
+    } else {
+        return "不明なノート"
     }
 }
 
@@ -77,6 +104,8 @@ let mainChannelUUID = crypto.randomUUID()
 let isCmdMode = false
 let isNoteMode = false
 let isPostFinalCheck = false
+let isSelectMode = false
+let selectingNoteNum = 0
 let noteText = ""
 let wsDisconnected = false
 let noteArray = []
@@ -97,38 +126,18 @@ function createWSConnection(conn) {
             const msgObj = JSON.parse(msg)
             const msgBody = msgObj.body
             //console.log(msgbody)
-            if ( msgObj.type == "channel" && isCmdMode == false && isNoteMode == false ) {
+            if ( msgObj.type == "channel") {
                 if ( msgBody.type == "note" ) {
-                    let text = "不明なノート"
                     // ノートのObjectを生成
                     const noteObj = createNoteObj(msgBody.body)
-                    const createdDate = new Date(noteObj.createdAt)
-                    if ( noteObj.type === "quote" && noteObj.text && noteObj.renote && noteObj.renote.text ) {
-                        // テキストもある、リノートIDもある(引用リノート)
-                        text = getUserStringFromUserObj(noteObj.user) + " が引用リノートしました: \r\n" + 
-                            replaceCrlf(noteObj.text) + "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
-                            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 )
-                    } else if ( noteObj.type === "reply" && noteObj.text && noteObj.reply && noteObj.reply.text ) {
-                        // テキストはないけどリノートIDがある、リノートのノートもある(リノート)
-                        text = getUserStringFromUserObj(noteObj.user) + " が返信しました: \r\n" + 
-                            replaceCrlf(noteObj.text) + "\r\nRE(" + getUserStringFromUserObj(noteObj.reply.user, true) + "): \r\n" + replaceCrlf(noteObj.reply.text) +
-                            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 )
-                    } else if ( noteObj.type === "note" && noteObj.text ) {
-                        // テキストがある(ノート)
-                        text = getUserStringFromUserObj(noteObj.user) + " がノートしました: \r\n" + 
-                            replaceCrlf(noteObj.text) +
-                            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 );
-                    } else if ( noteObj.type === "renote" && noteObj.renote && noteObj.renote.text) {
-                        // テキストはないけどリノートのノートがある(リノート)
-                        text = getUserStringFromUserObj(noteObj.user) + " がリノートしました: " + 
-                            "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
-                            "\r\n" + createdDate.toLocaleString('ja-JP');
-                    }
-                    addToNoteArray(noteObj)
                     // SJISにエンコード
-                    const encodedText = iconv.encode("===============================\r\n" + text + "\r\n===============================\r\n", 'SJIS')
+                    const encodedText = iconv.encode("===============================\r\n" + noteObjToDisp(noteObj) + "\r\n===============================\r\n", 'SJIS')
                     // 送信
-                    conn.write(encodedText);
+                    if ( isCmdMode == false && isNoteMode == false && isSelectMode == false ) {
+                        conn.write(encodedText);
+                    }
+                    
+                    addToNoteArray(noteObj)
                 } else if ( msgBody.type == "unreadNotification" ) {
                     let text = `不明な新着通知 TYPE: ${msgBody.body.type}`
                     console.log("\nNEW NOTIFICATION!!!: " + JSON.stringify(msgBody.body) + "\n")
@@ -150,7 +159,9 @@ function createWSConnection(conn) {
                         
                     }
                     const encodedText = iconv.encode("\x07!!!===============================!!!\r\n" + text + "\r\n!!!===============================!!!\r\n", 'SJIS')
-                    conn.write(encodedText);
+                    if ( isCmdMode == false && isNoteMode == false && isSelectMode == false ) {
+                        conn.write(encodedText);
+                    }
                 }
             }
         });
@@ -225,6 +236,35 @@ function replaceCrlf(str) {
     return input.replace(/\n/g, "\r\n")
 }
 
+function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
+    // ループ数を決めるが、元々4個未満しかノートを取得してない場合はそれに合わせる
+    let loopcount = 4
+    if ( noteArray.length < 4 ) {
+        loopcount = noteArray.length
+    }
+    const textArray = []
+    for (let i = 0; i < loopcount; i++) {
+        if ( noteArray[i + offset] ) {
+            // SJISにエンコード
+            let encodedText = "不明なノート"
+            const currentNoteNum = ( noteArray.length - (i + offset) )
+            if ( i === 0 && showNoteSelectUi ) {
+                encodedText = ">>> ===============================\r\n" + noteObjToDisp(noteArray[i + offset], currentNoteNum) + "\r\n>>> ===============================\r\n"
+            } else {
+                encodedText = "===============================\r\n" + noteObjToDisp(noteArray[i + offset], currentNoteNum) + "\r\n===============================\r\n"
+            }
+            // 先頭に置いていき、選択したものは常に一番下に来るようにする
+            textArray.unshift(encodedText)
+        }
+    }
+    
+    if ( showNoteSelectUi ) {
+        textArray.push("ノート選択モード I: ↑ | K: ↓ | Escキーで終了" + (noteArray.length - offset) + " / " + noteArray.length + "\r\n")
+        conn.write(iconv.encode("\x1Bc", 'SJIS'))
+    }
+    conn.write(iconv.encode(textArray.join(""), 'SJIS'));
+} 
+
 function processCmd(data, conn) {
     console.log(data)
     let text = ""
@@ -248,6 +288,8 @@ function processCmd(data, conn) {
                         console.log(await data.text())
                     })
                     noteText = ""
+                    text = "\r\nノートは投稿されました。\r\n"
+                    dispFourNote(conn)
                 } else {
                     isPostFinalCheck = false
                 }
@@ -257,10 +299,11 @@ function processCmd(data, conn) {
                     text = "\x1Bc\r\nノートの投稿内容確認: 以下の内容で投稿します。\r\n###---ノートの始まり---###\r\n" + noteText + "\r\n###---ノートの終わり---###\r\n\r\n>>> よろしいですか？(Y/N): ", 'SJIS'
                     isPostFinalCheck = true
                 } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1 ) {
-                    text = "\r\nノートの投稿を中止しました。"
+                    text = "\r\nノートの投稿を中止しました。\r\n"
                     isCmdMode = false
                     isNoteMode = false
                     noteText = ""
+                    dispFourNote(conn)
                 } else {
                     isCmdMode = false
                 }
@@ -276,6 +319,28 @@ function processCmd(data, conn) {
                 conn.write(iconv.encode('\x1Bc', 'SJIS'))
                 conn.write(iconv.encode(noteText, 'SJIS'))
             }
+        } else if ( isSelectMode ) {
+            if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
+                console.log("UP PRESSED: " + selectingNoteNum)
+                selectingNoteNum = selectingNoteNum + 1
+            } else if ( data.indexOf("K") !== -1 || data.indexOf("k") !== -1 ){
+                console.log("DOWN PRESSED: " + selectingNoteNum)
+                selectingNoteNum = selectingNoteNum - 1
+            } else if ( data.indexOf("\u001B") !== -1 ) {
+                text = "\r\n選択モードを終了しました。\r\n"
+                isCmdMode = false
+                isSelectMode = false
+                noteText = ""
+                dispFourNote(conn)
+            }
+            if ( selectingNoteNum > noteArray.length - 1 ) {
+                selectingNoteNum = noteArray.length - 1
+            } else if ( selectingNoteNum < 0 ) {
+                selectingNoteNum = 0
+            } 
+            if ( data.indexOf("\u001B") === -1 ) {
+                dispFourNote(conn, selectingNoteNum, true)
+            }
         } else if ( isCmdMode == false ) {
             /* 通常受信中にコマンドモードに移行する */
             if ( data.indexOf("\u001B") !== -1 ) {
@@ -288,7 +353,7 @@ function processCmd(data, conn) {
                 text = "\r\n中止しました\r\n"
                 isCmdMode = false
             } else if ( data.indexOf("N") !== -1 || data.indexOf("n") !== -1 ) {
-                text = "\r\nWIP\r\n現在ノート投稿モードです。\r\nEscを押すと、ノートの送信操作や、公開範囲の変更などを行うことができます。\r\n"
+                text = "\r\n現在ノート投稿モードです。\r\nEscを押すと、ノートの送信操作や、公開範囲の変更などを行うことができます。\r\n"
                 isNoteMode = true
                 isCmdMode = false
             } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1 ) {
@@ -299,10 +364,16 @@ function processCmd(data, conn) {
                 isPostFinalCheck = false
                 noteText = ""
                 isCmdMode = false
+                isSelectMode = false
             } else if ( data.indexOf("D") !== -1 || data.indexOf("d") !== -1 ) {
                 text = "\r\nチャンネルとWSから切断します...\r\n"
                 disconnectWS()
                 isCmdMode = false
+            } else if ( data.indexOf("S") !== -1 || data.indexOf("s") !== -1 ) {
+                isSelectMode = true
+                selectingNoteNum = 0
+                isCmdMode = false
+                dispFourNote(conn, selectingNoteNum, true)
             } else {
                 text = "\r\n不明なコマンドです。中止しました\r\n"
                 isCmdMode = false
@@ -336,6 +407,7 @@ var server = net
     conn.write(iconv.encode("接続しています…", 'SJIS'));
 
     const currentDate = new Date();
+    conn.write(iconv.encode("ユーザー情報を取得しています…\r\n", 'SJIS'))
     createWSConnection(conn).then(async (res) => {
         if ( res ) {
             const userinfo = await getUserInfo()
