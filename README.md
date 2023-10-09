@@ -1,5 +1,5 @@
-# MissTelnet
-MissTelnetは、Node.jsとwsモジュールを使用して開発されているMisskeyのクライアントとして動作するTelnetサーバーです。   
+# MissTelnet(仮)
+MissTelnet(仮題)は、Node.jsとwsモジュールを使用して開発されているMisskeyのクライアントとして動作するTelnetサーバーです。   
 どんなに古いシステムでもこのサーバーをセットアップすることで、   
 好きなインスタンスのタイムラインを閲覧したり、ノートの投稿ができるようになります。   
 
