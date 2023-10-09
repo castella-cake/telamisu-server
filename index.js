@@ -5,10 +5,10 @@ const iconv = require("iconv-lite");
 const version = "v0.1.0";
 const { server_hostname, token, telnet_port, channel } = require("./config.json");
 
-const logo = `  __  __ ___ ___ ___ _____ ___ _    _  _ ___ _____ 
-|  \\/  |_ _/ __/ __|_   _| __| |  | \\| | __|_   _|
-| |\\/| || |\\__ \\__ \\ | | | _|| |__| .' | _|  | |  
-|_|  |_|___|___/___/ |_| |___|____|_|\\_|___| |_|  `
+const logo = `  _____ ___ _      _   __  __ ___ ___ _   _ 
+|_   _| __| |    /_\\ |  \\/  |_ _/ __| | | |
+  | | | _|| |__ / _ \\| |\\/| || |\\__ \\ |_| |
+  |_| |___|____/_/ \\_\\_|  |_|___|___/\\___/ `
 
 const logoforcmd = logo.replace(/\n/g, "\r\n")
 
@@ -412,7 +412,7 @@ var server = net
         if ( res ) {
             const userinfo = await getUserInfo()
             const connectedText = logoforcmd + 
-                "\r\nWELCOME TO MISSTELNET! version: " + version + 
+                "\r\nWELCOME TO TELAMISU! version: " + version + 
                 "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
                 "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
                 "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n" + 
@@ -430,4 +430,4 @@ var server = net
 })
 .listen(telnet_port);
 
-console.log("telnet server ready on port" + telnet_port);
+console.log("telnet server ready on port " + telnet_port);
