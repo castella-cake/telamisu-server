@@ -34,6 +34,34 @@ function getUserInfo() {
     })
 }
 
+// ノートのオブジェクトから内容を簡潔にしたオブジェクトを生成するfunction
+// リノートに関してはあまり必要がないため、何も返しません
+function createNoteObj(note) {
+    if ( note.text && note.renoteId && note.renote ) {
+        // テキストもある、リノートIDもある(引用リノート)
+        text = getUserStringFromUserObj(note.user) + " が引用リノートしました: \r\n" + 
+            replaceCrlf(note.text) + "\r\nRN(" + getUserStringFromUserObj(note.renote.user, true) + "): " + replaceCrlf(note.renote.text);
+        return { type: "quote", id: note.id, createdAt: note.createdAt, user: {name: note.user.name, username: note.user.username, host: note.user.host}, text: note.text, renote: createNoteObj(note.renote) }
+    } else if ( note.text ) {
+        // テキストがある(ノート)
+        return { type: "quote", id: note.id, createdAt: note.createdAt, user: {name: note.user.name, username: note.user.username, host: note.user.host}, text: note.text }
+    } else if ( note.renoteId && note.renote ) {
+        // テキストはないけどリノートIDがある、リノートのノートもある(リノート)
+        return null
+    } else if ( note.renoteId ) {
+        return null
+    }
+    return
+}
+
+function addToNoteArray(noteobj) {
+    if ( noteobj ) {
+        noteArray.push(noteobj)
+    } else {
+        return false 
+    }
+}
+
 /*  
     websocket,コマンドの変数用意
 */
@@ -47,12 +75,14 @@ let isNoteMode = false
 let isPostFinalCheck = false
 let noteText = ""
 let wsDisconnected = false
+let noteArray = []
 
 function createWSConnection(conn) {
     return new Promise((resolve, reject) => {
         // Misskeyにチャンネルを識別させるためにUUIDを振る
         timeLineChannelUUID = crypto.randomUUID()
         mainChannelUUID = crypto.randomUUID()
+        noteArray = []
         client = new WebSocket(`wss://${server_hostname}/streaming?i=${token}`);
 
         client.on('error', console.error);
@@ -66,23 +96,29 @@ function createWSConnection(conn) {
             if ( msgObj.type == "channel" && isCmdMode == false && isNoteMode == false ) {
                 if ( msgBody.type == "note" ) {
                     let text = "不明なノート"
+                    const createdDate = new Date(msgBody.body.createdAt)
                     if ( msgBody.body.text && msgBody.body.renoteId && msgBody.body.renote.text ) {
                         // テキストもある、リノートIDもある(引用リノート)
                         text = getUserStringFromUserObj(msgBody.body.user) + " が引用リノートしました: \r\n" + 
-                            replaceCrlf(msgBody.body.text) + "\r\nRN(" + getUserStringFromUserObj(msgBody.body.renote.user, true) + "): " + replaceCrlf(msgBody.body.renote.text);
+                            replaceCrlf(msgBody.body.text) + "\r\nRN(" + getUserStringFromUserObj(msgBody.body.renote.user, true) + "): " + replaceCrlf(msgBody.body.renote.text) +
+                            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 )
                     } else if ( msgBody.body.text ) {
                         // テキストがある(ノート)
                         text = getUserStringFromUserObj(msgBody.body.user) + " がノートしました: \r\n" + 
-                            replaceCrlf(msgBody.body.text);
+                            replaceCrlf(msgBody.body.text) +
+                            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 );
                     } else if ( msgBody.body.renoteId && msgBody.body.renote.text ) {
                         // テキストはないけどリノートIDがある、リノートのノートのテキストもある(リノート)
                         text = getUserStringFromUserObj(msgBody.body.user) + " がリノートしました: " + 
-                            "\r\nRN(" + getUserStringFromUserObj(msgBody.body.renote.user, true) + "): " + replaceCrlf(msgBody.body.renote.text);
+                            "\r\nRN(" + getUserStringFromUserObj(msgBody.body.renote.user, true) + "): " + replaceCrlf(msgBody.body.renote.text) +
+                            "\r\n" + createdDate.toLocaleString('ja-JP');
                     } else if ( msgBody.body.renoteId ) {
                         // テキストはないけどリノートIDがある(リノート)
                         text = getUserStringFromUserObj(msgBody.body.user) + " がリノートしました: \r\nRN: " + 
-                            msgBody.body.renoteId;
+                            msgBody.body.renoteId +
+                            "\r\n" + createdDate.toLocaleString('ja-JP');
                     }
+                    addToNoteArray(createNoteObj(msgBody.body))
                     // SJISにエンコード
                     const encodedText = iconv.encode("===============================\r\n" + text + "\r\n===============================\r\n", 'SJIS')
                     // 送信
