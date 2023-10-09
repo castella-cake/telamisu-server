@@ -37,17 +37,17 @@ function getUserInfo() {
 // ノートのオブジェクトから内容を簡潔にしたオブジェクトを生成するfunction
 // リノートに関してはあまり必要がないため、何も返しません
 function createNoteObj(note) {
-    let noteText = note.text ?? ""
+    let noteText = note.text ?? null
     if ( note.files.length >= 1 ) {
         noteText += "[ " + note.files.length + " 個のファイル ]"
     }
-    if ( note.renote && note.text ) {
+    if ( note.renote && noteText ) {
         // テキストもある、リノートIDもある(引用リノート)
         return { type: "quote", id: note.id, createdAt: note.createdAt, user: {name: note.user.name, username: note.user.username, host: note.user.host}, text: noteText, renote: createNoteObj(note.renote) }
     } else if ( note.reply ) {
         // テキストもある、返信先もある(返信)
         return { type: "reply", id: note.id, createdAt: note.createdAt, user: {name: note.user.name, username: note.user.username, host: note.user.host}, text: noteText, reply: createNoteObj(note.reply) }
-    } else if ( note.text ) {
+    } else if ( noteText ) {
         // テキストがある(ノート)
         return { type: "note", id: note.id, createdAt: note.createdAt, user: {name: note.user.name, username: note.user.username, host: note.user.host}, text: noteText }
     } else if ( note.renote ) {
@@ -103,12 +103,12 @@ function createWSConnection(conn) {
                     // ノートのObjectを生成
                     const noteObj = createNoteObj(msgBody.body)
                     const createdDate = new Date(noteObj.createdAt)
-                    if ( noteObj.type === "quote" && noteObj.text && noteObj.renote.text ) {
+                    if ( noteObj.type === "quote" && noteObj.text && noteObj.renote && noteObj.renote.text ) {
                         // テキストもある、リノートIDもある(引用リノート)
                         text = getUserStringFromUserObj(noteObj.user) + " が引用リノートしました: \r\n" + 
                             replaceCrlf(noteObj.text) + "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
                             "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 )
-                    } else if ( noteObj.type === "reply" && noteObj.text && noteObj.reply.text ) {
+                    } else if ( noteObj.type === "reply" && noteObj.text && noteObj.reply && noteObj.reply.text ) {
                         // テキストはないけどリノートIDがある、リノートのノートもある(リノート)
                         text = getUserStringFromUserObj(noteObj.user) + " が返信しました: \r\n" + 
                             replaceCrlf(noteObj.text) + "\r\nRE(" + getUserStringFromUserObj(noteObj.reply.user, true) + "): \r\n" + replaceCrlf(noteObj.reply.text) +
@@ -118,7 +118,7 @@ function createWSConnection(conn) {
                         text = getUserStringFromUserObj(noteObj.user) + " がノートしました: \r\n" + 
                             replaceCrlf(noteObj.text) +
                             "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + ( noteArray.length + 1 );
-                    } else if ( noteObj.type === "renote" && noteObj.renote.text ) {
+                    } else if ( noteObj.type === "renote" && noteObj.renote && noteObj.renote.text) {
                         // テキストはないけどリノートのノートがある(リノート)
                         text = getUserStringFromUserObj(noteObj.user) + " がリノートしました: " + 
                             "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
@@ -174,6 +174,7 @@ function createWSConnection(conn) {
                     params: {}
                 }
             }));
+            conn.write(iconv.encode("\r\nチャンネル " + channel + " に接続しました。", 'SJIS'));
             client.send(JSON.stringify({
                 type: 'connect',
                 body: {
@@ -182,7 +183,8 @@ function createWSConnection(conn) {
                     params: {}
                 }
             }));
-            conn.write(iconv.encode("接続しました。\r\n", 'SJIS'));
+            conn.write(iconv.encode("\r\nチャンネル main に接続しました。", 'SJIS'));
+            conn.write(iconv.encode("\r\n接続しました。\r\n", 'SJIS'));
             resolve(true)
         });
     })
@@ -277,7 +279,7 @@ function processCmd(data, conn) {
         } else if ( isCmdMode == false ) {
             /* 通常受信中にコマンドモードに移行する */
             if ( data.indexOf("\u001B") !== -1 ) {
-                text = ">>> ノート(N) / 切断して終了(Q) / サーバーから切断(D) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: "
+                text = ">>> ノート(N) / 選択(S) / 切断して終了(Q) / サーバーから切断(D) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: "
                 isCmdMode = true
             }
         } else {
@@ -332,19 +334,21 @@ var server = net
     tcpClients[clientId] = conn;
 
     conn.write(iconv.encode("接続しています…", 'SJIS'));
+
+    const currentDate = new Date();
     createWSConnection(conn).then(async (res) => {
         if ( res ) {
             const userinfo = await getUserInfo()
             const connectedText = logoforcmd + 
                 "\r\nWELCOME TO MISSTELNET! version: " + version + 
                 "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
-                "TELNET(PORT " + telnet_port + ") で接続中です。\r\n\r\n"+ 
+                "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
+                "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n" + 
                 "ユーザー名 " + userinfo.name + " (@" + userinfo.userName + ") としてログイン中です。\r\n" + 
                 "フォロワー: " + userinfo.followersCount + 
                 " | フォロー: " + userinfo.followingCount + 
                 " | ノート: " + userinfo.notesCount + 
-                "\r\n\r\n それでは、お楽しみください！\r\n" + 
-                "チャンネル " + channel + " に接続されています。\r\n"
+                "\r\n\r\nHave fun!\r\n"
             const encodedConnectedText = iconv.encode(connectedText, 'SJIS')
             conn.write(encodedConnectedText)
         }
