@@ -1,0 +1,6 @@
+{
+    "server_hostname": "example.com",
+    "token": "TOKEN",
+    "telnet_port": 23,
+    "channel": "hybridTimeline"
+}
