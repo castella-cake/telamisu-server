@@ -1,6 +1,7 @@
 {
     "servers": [ "example.com" ],
     "tokens": { "example.com": "TOKEN" },
+    "bypassselectscreen": false,
     "telnet_port": 23,
     "channel": "hybridTimeline"
 }
