@@ -115,7 +115,7 @@ let isNoteMode = false
 let isPostFinalCheck = false
 let isSelectMode = false
 let selectingNoteNum = 0
-let noteText = ""
+let currentWritingNoteArray = []
 let wsDisconnected = false
 let noteArray = []
 
@@ -289,7 +289,7 @@ function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
     
     if ( showNoteSelectUi ) {
         textArray.push("ノート選択モード I: ↑ | K: ↓ | Escキーで終了" + (noteArray.length - offset) + " / " + noteArray.length + "\r\n")
-        conn.write(iconv.encode("\x1Bc", 'SJIS'))
+        conn.write(iconv.encode(" \x1b[2J\x1b[H", 'SJIS'))
     }
     conn.write(iconv.encode(textArray.join(""), 'SJIS'));
 } 
@@ -307,11 +307,11 @@ function processCmd(data, conn) {
             conn.destroy()
             isNoteMode = false
             isPostFinalCheck = false
-            noteText = ""
+            currentWritingNoteArray = []
             isCmdMode = false
             isSelectMode = false
         } else if ( data.indexOf("\u000d") !== -1 ) {
-            conn.write(iconv.encode(`\x1Bc`, 'SJIS'))
+            conn.write(iconv.encode(` \x1b[2J\x1b[H`, 'SJIS'))
             server_select = selectingServer
             if ( servers[server_select] && tokens[servers[server_select]] ) {
                 server_hostname = servers[server_select]
@@ -329,7 +329,7 @@ function processCmd(data, conn) {
         }
         if ( data.indexOf("\u000d") === -1 ) {
             const currentDate = new Date();
-            let text = "\x1Bc\r\nWelcome to the Telamisu!\r\n" +
+            let text = " \x1b[2J\x1b[H\r\nWelcome to the Telamisu!\r\n" +
             "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
             "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n接続先のサーバーを選んでください。\r\n";
             conn.write(iconv.encode(text, 'SJIS'))
@@ -357,11 +357,11 @@ function processCmd(data, conn) {
                     isPostFinalCheck = false
                     isCmdMode = false
                     isNoteMode = false
-                    let notebody = JSON.stringify({ "i": token, text: noteText })
+                    let notebody = JSON.stringify({ "i": token, text: iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS') })
                     fetch(`https://${server_hostname}/api/notes/create`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": notebody }).then(async (data) => {
                         console.log(await data.text())
                     })
-                    noteText = ""
+                    currentWritingNoteArray = []
                     text = "\r\nノートは投稿されました。\r\n"
                     dispFourNote(conn)
                 } else {
@@ -370,31 +370,38 @@ function processCmd(data, conn) {
             }
             if ( !isPostFinalCheck && isCmdMode == true ) {
                 if ( data.indexOf("P") !== -1 || data.indexOf("p") !== -1 ) {
-                    text = "\x1Bc\r\nノートの投稿内容確認: 以下の内容で投稿します。\r\n###---ノートの始まり---###\r\n" + noteText + "\r\n###---ノートの終わり---###\r\n\r\n>>> よろしいですか？(Y/N): ", 'SJIS'
+                    text = " \x1b[2J\x1b[H\r\nノートの投稿内容確認: 以下の内容で投稿します。\r\n###---ノートの始まり---###\r\n" + iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS') + "\r\n###---ノートの終わり---###\r\n\r\n>>> よろしいですか？(Y/N): ", 'SJIS'
                     isPostFinalCheck = true
                 } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1 ) {
                     text = "\r\nノートの投稿を中止しました。\r\n"
                     isCmdMode = false
                     isNoteMode = false
-                    noteText = ""
+                    currentWritingNoteArray = []
                     dispFourNote(conn)
                 } else {
                     isCmdMode = false
                 }
             } else if ( !isPostFinalCheck && isCmdMode == false && isNoteMode == true ) {
-                if ( data.indexOf("\u0008") !== -1 ) {
-                    noteText = noteText.slice(0, -1)
+                if ( data.indexOf("\u0008") !== -1 ||  data.indexOf("\u007f") !== -1 ) {
+                    console.log("backspace or del detected")
+                    // SJISの文字コードで書かれたバッファをUTF-8に変換して、一文字削除する
+                    const SJISDecodedDelAfter = iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS').slice(0, -1)
+                    // UTF-8に変換して処理したstringを、SJISにエンコードしてバッファに変換する
+                    currentWritingNoteArray = Buffer.from(iconv.encode(SJISDecodedDelAfter, 'SJIS')).toJSON().data
                 } else if ( data === "\r" ) { 
                     console.log("break detected")
-                    noteText = noteText + "\r\n"
+                    currentWritingNoteArray = currentWritingNoteArray.concat([13, 10])
                 } else if ( data.indexOf("\u001B") !== -1 ){
                     text = "\r\n>>> 投稿(P) / 破棄して戻る(Q) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: "
                     isCmdMode = true
                 } else {
-                    noteText = noteText + iconv.decode(Buffer.from(data, 'binary'), 'SJIS')
+                    currentWritingNoteArray = currentWritingNoteArray.concat(data.toJSON().data)
+                    console.log(currentWritingNoteArray)
+                    console.log(data.toJSON().data)
                 }
-                conn.write(iconv.encode('\x1Bc', 'SJIS'))
-                conn.write(iconv.encode(noteText, 'SJIS'))
+                console.log(iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS'))
+                conn.write(iconv.encode(' \x1b[2J\x1b[H', 'SJIS'))
+                conn.write(Buffer.from(currentWritingNoteArray, 'binary'))
             }
         } else if ( isSelectMode ) {
             if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
@@ -407,7 +414,7 @@ function processCmd(data, conn) {
                 text = "\r\n選択モードを終了しました。\r\n"
                 isCmdMode = false
                 isSelectMode = false
-                noteText = ""
+                currentWritingNoteArray = []
                 dispFourNote(conn)
             }
             if ( selectingNoteNum > noteArray.length - 1 ) {
@@ -439,7 +446,7 @@ function processCmd(data, conn) {
                 conn.destroy()
                 isNoteMode = false
                 isPostFinalCheck = false
-                noteText = ""
+                currentWritingNoteArray = []
                 isCmdMode = false
                 isSelectMode = false
             } else if ( data.indexOf("D") !== -1 || data.indexOf("d") !== -1 ) {
@@ -483,7 +490,7 @@ var server = net
 
     isNoteMode = false
     isPostFinalCheck = false
-    noteText = ""
+    currentWritingNoteArray = []
     isCmdMode = false
     isSelectMode = false
 
