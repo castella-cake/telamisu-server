@@ -1,6 +1,6 @@
 {
   "name": "misstelnet",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Misskey Telnet Server",
   "main": "index.js",
   "scripts": {
@@ -10,6 +10,7 @@
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
     "iconv-lite": "^0.6.3",
-    "ws": "^8.14.2"
+    "ws": "^8.14.2",
+    "zmodem.js": "^0.1.10"
   }
 }

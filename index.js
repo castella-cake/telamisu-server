@@ -2,8 +2,8 @@ const WebSocket = require('ws');
 const net = require("net");
 const crypto = require("crypto");
 const iconv = require("iconv-lite");
-const version = "v0.1.0";
-const { server_hostname, token, telnet_port, channel } = require("./config.json");
+const version = "v0.2.0";
+const { servers, tokens, telnet_port, channel, bypassselectscreen } = require("./config.json");
 
 const logo = `  _____ ___ _      _   __  __ ___ ___ _   _ 
 |_   _| __| |    /_\\ |  \\/  |_ _/ __| | | |
@@ -12,12 +12,15 @@ const logo = `  _____ ___ _      _   __  __ ___ ___ _   _
 
 const logoforcmd = logo.replace(/\n/g, "\r\n")
 
-// 接続時のウェルカムメッセージ用に自身の情報を写す
-let infoFetchbody = JSON.stringify({ "i": token })
+let server_select = 0
+let server_hostname = servers[server_select]
+let token = tokens[servers[server_select]]
 
 
 function getUserInfo() {
     return new Promise((resolve,reject) => {
+        // 接続時のウェルカムメッセージ用に自身の情報を写す
+        let infoFetchbody = JSON.stringify({ "i": token })
         let userinfo = { name: "", userName: "", id: "", followersCount: -1, followingCount: -1, notesCount: -1 }
         fetch(`https://${server_hostname}/api/i`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": infoFetchbody }).then(async (data) => {
             let datatext = await data.text()
@@ -67,27 +70,31 @@ function addToNoteArray(noteObj) {
 }
 
 function noteObjToDisp(noteObj, noteNum = noteArray.length + 1) {
-    const createdDate = new Date(noteObj.createdAt)
-    if ( noteObj.type === "quote" && noteObj.text && noteObj.renote && noteObj.renote.text ) {
-        // テキストもある、リノートIDもある(引用リノート)
-        return getUserStringFromUserObj(noteObj.user) + " が引用リノートしました: \r\n" + 
-            replaceCrlf(noteObj.text) + "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
-            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
-    } else if ( noteObj.type === "reply" && noteObj.text && noteObj.reply && noteObj.reply.text ) {
-        // テキストはないけどリノートIDがある、リノートのノートもある(リノート)
-        return getUserStringFromUserObj(noteObj.user) + " が返信しました: \r\n" + 
-            replaceCrlf(noteObj.text) + "\r\nRE(" + getUserStringFromUserObj(noteObj.reply.user, true) + "): \r\n" + replaceCrlf(noteObj.reply.text) +
-            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
-    } else if ( noteObj.type === "note" && noteObj.text ) {
-        // テキストがある(ノート)
-        return getUserStringFromUserObj(noteObj.user) + " がノートしました: \r\n" + 
-            replaceCrlf(noteObj.text) +
-            "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
-    } else if ( noteObj.type === "renote" && noteObj.renote && noteObj.renote.text) {
-        // テキストはないけどリノートのノートがある(リノート)
-        return getUserStringFromUserObj(noteObj.user) + " がリノートしました: " + 
-            "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
-            "\r\n" + createdDate.toLocaleString('ja-JP');
+    if ( noteObj ) {
+        const createdDate = new Date(noteObj.createdAt)
+        if ( noteObj.type === "quote" && noteObj.text && noteObj.renote && noteObj.renote.text ) {
+            // テキストもある、リノートIDもある(引用リノート)
+            return getUserStringFromUserObj(noteObj.user) + " が引用リノートしました: \r\n" + 
+                replaceCrlf(noteObj.text) + "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
+                "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
+        } else if ( noteObj.type === "reply" && noteObj.text && noteObj.reply && noteObj.reply.text ) {
+            // テキストはないけどリノートIDがある、リノートのノートもある(リノート)
+            return getUserStringFromUserObj(noteObj.user) + " が返信しました: \r\n" + 
+                replaceCrlf(noteObj.text) + "\r\nRE(" + getUserStringFromUserObj(noteObj.reply.user, true) + "): \r\n" + replaceCrlf(noteObj.reply.text) +
+                "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
+        } else if ( noteObj.type === "note" && noteObj.text ) {
+            // テキストがある(ノート)
+            return getUserStringFromUserObj(noteObj.user) + " がノートしました: \r\n" + 
+                replaceCrlf(noteObj.text) +
+                "\r\n" + createdDate.toLocaleString('ja-JP') + " / " + noteNum;
+        } else if ( noteObj.type === "renote" && noteObj.renote && noteObj.renote.text) {
+            // テキストはないけどリノートのノートがある(リノート)
+            return getUserStringFromUserObj(noteObj.user) + " がリノートしました: " + 
+                "\r\nRN(" + getUserStringFromUserObj(noteObj.renote.user, true) + "): \r\n" + replaceCrlf(noteObj.renote.text) +
+                "\r\n" + createdDate.toLocaleString('ja-JP');
+        } else {
+            return "不明なノート"
+        }
     } else {
         return "不明なノート"
     }
@@ -101,103 +108,126 @@ let client
 let timeLineChannelUUID = crypto.randomUUID()
 let mainChannelUUID = crypto.randomUUID()
 
+let isConnectionSelect = false
+let selectingServer = 0
 let isCmdMode = false
 let isNoteMode = false
 let isPostFinalCheck = false
 let isSelectMode = false
 let selectingNoteNum = 0
-let noteText = ""
+let currentWritingNoteArray = []
 let wsDisconnected = false
 let noteArray = []
 
-function createWSConnection(conn) {
+function createWSConnection(conn, suppressWelcomeText = false) {
     return new Promise((resolve, reject) => {
-        // Misskeyにチャンネルを識別させるためにUUIDを振る
-        timeLineChannelUUID = crypto.randomUUID()
-        mainChannelUUID = crypto.randomUUID()
-        noteArray = []
-        client = new WebSocket(`wss://${server_hostname}/streaming?i=${token}`);
+        if ( token ) {
+            // Misskeyにチャンネルを識別させるためにUUIDを振る
+            timeLineChannelUUID = crypto.randomUUID()
+            mainChannelUUID = crypto.randomUUID()
+            noteArray = []
+            client = new WebSocket(`wss://${server_hostname}/streaming?i=${token}`);
 
-        client.on('error', console.error);
+            client.on('error', console.error);
 
-        // wsからチャンネルとノートのメッセージが来たなら放流する
-        client.on('message', function(msg) {
-            console.log("Received: '" + msg + "'");
-            const msgObj = JSON.parse(msg)
-            const msgBody = msgObj.body
-            //console.log(msgbody)
-            if ( msgObj.type == "channel") {
-                if ( msgBody.type == "note" ) {
-                    // ノートのObjectを生成
-                    const noteObj = createNoteObj(msgBody.body)
-                    // SJISにエンコード
-                    const encodedText = iconv.encode("===============================\r\n" + noteObjToDisp(noteObj) + "\r\n===============================\r\n", 'SJIS')
-                    // 送信
-                    if ( isCmdMode == false && isNoteMode == false && isSelectMode == false ) {
-                        conn.write(encodedText);
-                    }
-                    
-                    addToNoteArray(noteObj)
-                } else if ( msgBody.type == "unreadNotification" ) {
-                    let text = `不明な新着通知 TYPE: ${msgBody.body.type}`
-                    console.log("\nNEW NOTIFICATION!!!: " + JSON.stringify(msgBody.body) + "\n")
-                    if (msgBody.body.type == "quote" && msgBody.body.note.text && msgBody.body.note.renote.text) {
-                        text = "新着通知: 引用リノートされました\r\nFROM: " + getUserStringFromUserObj(msgBody.body.user) + "\r\n" + 
-                            replaceCrlf(msgBody.body.note.text) + "\r\nRN: " + replaceCrlf(msgBody.body.note.renote.text);
+            // wsからチャンネルとノートのメッセージが来たなら放流する
+            client.on('message', function(msg) {
+                console.log("Received: '" + msg + "'");
+                const msgObj = JSON.parse(msg)
+                const msgBody = msgObj.body
+                //console.log(msgbody)
+                if ( msgObj.type == "channel") {
+                    if ( msgBody.type == "note" ) {
+                        // ノートのObjectを生成
+                        const noteObj = createNoteObj(msgBody.body)
+                        // SJISにエンコード
+                        const encodedText = iconv.encode("===============================\r\n" + noteObjToDisp(noteObj) + "\r\n===============================\r\n", 'SJIS')
+                        // 送信
+                        if ( isCmdMode == false && isNoteMode == false && isSelectMode == false ) {
+                            conn.write(encodedText);
+                        }
                         
-                    } else if (msgBody.body.type == "renote" && msgBody.body.note.renote.text) {
-                        text = "新着通知: リノートされました\r\nFROM: " + getUserStringFromUserObj(msgBody.body.user) + "\r\n" + 
-                            "RN(You): " + replaceCrlf(msgBody.body.note.renote.text);
-                        
-                    } else if (msgBody.body.type == "reaction" && msgBody.body.note.text) {
-                        text = "新着通知: リアクションされました\r\nFROM: " + getUserStringFromUserObj(msgBody.body.user) + ": " + 
-                            msgBody.body.reaction + "\r\nRA: " + replaceCrlf(msgBody.body.note.text);
-                        
-                    } else if (msgBody.body.type == "reply" && msgBody.body.note.text) {
-                        text = "新着通知: 新しい返信が追加されました" + getUserStringFromUserObj(msgBody.body.user) + "\r\n" + 
-                            replaceCrlf(msgBody.body.note.text) + "\r\nRE: " + replaceCrlf(msgBody.body.note.reply.text);
-                        
-                    }
-                    const encodedText = iconv.encode("\x07!!!===============================!!!\r\n" + text + "\r\n!!!===============================!!!\r\n", 'SJIS')
-                    if ( isCmdMode == false && isNoteMode == false && isSelectMode == false ) {
-                        conn.write(encodedText);
+                        addToNoteArray(noteObj)
+                    } else if ( msgBody.type == "unreadNotification" ) {
+                        let text = `不明な新着通知 TYPE: ${msgBody.body.type}`
+                        console.log("\nNEW NOTIFICATION!!!: " + JSON.stringify(msgBody.body) + "\n")
+                        if (msgBody.body.type == "quote" && msgBody.body.note.text && msgBody.body.note.renote.text) {
+                            text = "新着通知: 引用リノートされました\r\nFROM: " + getUserStringFromUserObj(msgBody.body.user) + "\r\n" + 
+                                replaceCrlf(msgBody.body.note.text) + "\r\nRN: " + replaceCrlf(msgBody.body.note.renote.text);
+                            
+                        } else if (msgBody.body.type == "renote" && msgBody.body.note.renote.text) {
+                            text = "新着通知: リノートされました\r\nFROM: " + getUserStringFromUserObj(msgBody.body.user) + "\r\n" + 
+                                "RN(You): " + replaceCrlf(msgBody.body.note.renote.text);
+                            
+                        } else if (msgBody.body.type == "reaction" && msgBody.body.note.text) {
+                            text = "新着通知: リアクションされました\r\nFROM: " + getUserStringFromUserObj(msgBody.body.user) + ": " + 
+                                msgBody.body.reaction + "\r\nRA: " + replaceCrlf(msgBody.body.note.text);
+                            
+                        } else if (msgBody.body.type == "reply" && msgBody.body.note.text) {
+                            text = "新着通知: 新しい返信が追加されました" + getUserStringFromUserObj(msgBody.body.user) + "\r\n" + 
+                                replaceCrlf(msgBody.body.note.text) + "\r\nRE: " + replaceCrlf(msgBody.body.note.reply.text);
+                            
+                        }
+                        const encodedText = iconv.encode("\x07!!!===============================!!!\r\n" + text + "\r\n!!!===============================!!!\r\n", 'SJIS')
+                        if ( isCmdMode == false && isNoteMode == false && isSelectMode == false ) {
+                            conn.write(encodedText);
+                        }
                     }
                 }
-            }
-        });
-        // disconnectedなら通知する
-        client.on('close', function() {
-            console.log('Connection Closed');
-            const encodedText = iconv.encode("\x07\r\n!!!>>> WebSocketサーバーから切断されました。Yを押すと再接続します: ", 'SJIS');
-            conn.write(encodedText);
-            wsDisconnected = true
-        });
+            });
+            // disconnectedなら通知する
+            client.on('close', function() {
+                console.log('Connection Closed');
+                const encodedText = iconv.encode("\x07\r\n!!!>>> WebSocketサーバーから切断されました。Yを押すと再接続します: ", 'SJIS');
+                conn.write(encodedText);
+                wsDisconnected = true
+            });
 
-        client.on('open', function() {
-            console.log('WebSocket Client Connected');
-            wsDisconnected = false
-            conn.write(iconv.encode("チャンネルに参加しています…", 'SJIS'));
-            client.send(JSON.stringify({
-                type: 'connect',
-                body: {
-                    channel: channel,
-                    id: timeLineChannelUUID,
-                    params: {}
+            client.on('open', async function() {
+                console.log('WebSocket Client Connected');
+                wsDisconnected = false
+                conn.write(iconv.encode("チャンネルに参加しています…", 'SJIS'));
+                client.send(JSON.stringify({
+                    type: 'connect',
+                    body: {
+                        channel: channel,
+                        id: timeLineChannelUUID,
+                        params: {}
+                    }
+                }));
+                conn.write(iconv.encode("\r\nチャンネル " + channel + " に接続しました。", 'SJIS'));
+                client.send(JSON.stringify({
+                    type: 'connect',
+                    body: {
+                        channel: "main",
+                        id: mainChannelUUID,
+                        params: {}
+                    }
+                }));
+                conn.write(iconv.encode("\r\nチャンネル main に接続しました。", 'SJIS'));
+                conn.write(iconv.encode("\r\n接続しました。\r\n", 'SJIS'));
+                if ( !suppressWelcomeText ) {
+                    conn.write(iconv.encode("ユーザー情報を取得しています…\r\n", 'SJIS'))
+                    const userinfo = await getUserInfo()
+                    const currentDate = new Date()
+                    const connectedText = logoforcmd + 
+                        "\r\nWELCOME TO TELAMISU! version: " + version + 
+                        "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
+                        "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
+                        "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n" + 
+                        "ユーザー名 " + userinfo.name + " (@" + userinfo.userName + ") としてログイン中です。\r\n" + 
+                        "フォロワー: " + userinfo.followersCount + 
+                        " | フォロー: " + userinfo.followingCount + 
+                        " | ノート: " + userinfo.notesCount + 
+                        "\r\n\r\nHave fun!\r\n"
+                    const encodedConnectedText = iconv.encode(connectedText, 'SJIS')
+                    conn.write(encodedConnectedText)
                 }
-            }));
-            conn.write(iconv.encode("\r\nチャンネル " + channel + " に接続しました。", 'SJIS'));
-            client.send(JSON.stringify({
-                type: 'connect',
-                body: {
-                    channel: "main",
-                    id: mainChannelUUID,
-                    params: {}
-                }
-            }));
-            conn.write(iconv.encode("\r\nチャンネル main に接続しました。", 'SJIS'));
-            conn.write(iconv.encode("\r\n接続しました。\r\n", 'SJIS'));
-            resolve(true)
-        });
+                resolve(true)
+            });
+        } else {
+            reject(false)
+        }
     })
 }
 
@@ -260,7 +290,7 @@ function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
     
     if ( showNoteSelectUi ) {
         textArray.push("ノート選択モード I: ↑ | K: ↓ | Escキーで終了" + (noteArray.length - offset) + " / " + noteArray.length + "\r\n")
-        conn.write(iconv.encode("\x1Bc", 'SJIS'))
+        conn.write(iconv.encode(" \x1b[2J\x1b[H", 'SJIS'))
     }
     conn.write(iconv.encode(textArray.join(""), 'SJIS'));
 } 
@@ -268,10 +298,55 @@ function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
 function processCmd(data, conn) {
     console.log(data)
     let text = ""
-    if ( wsDisconnected == true ) {
+    if ( isConnectionSelect ) {
+        if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
+            selectingServer = selectingServer + 1
+        } else if ( data.indexOf("K") !== -1 || data.indexOf("k") !== -1 ){
+            selectingServer = selectingServer - 1
+        } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1) {
+            text = "\r\nGoodbye!\r\n"
+            conn.destroy()
+            isNoteMode = false
+            isPostFinalCheck = false
+            currentWritingNoteArray = []
+            isCmdMode = false
+            isSelectMode = false
+        } else if ( data.indexOf("\u000d") !== -1 ) {
+            conn.write(iconv.encode(` \x1b[2J\x1b[H`, 'SJIS'))
+            server_select = selectingServer
+            if ( servers[server_select] && tokens[servers[server_select]] ) {
+                server_hostname = servers[server_select]
+                token = tokens[servers[server_select]]
+                isConnectionSelect = false
+                createWSConnection(conn)
+            } else {
+                conn.write(iconv.encode(`\r\n接続先が不明です。config.jsonに正しくトークンとサーバーを記述したか確認してください。\r\n`, 'SJIS'))
+            }
+        }
+        if ( selectingServer > servers.length - 1 ) {
+            selectingServer = 0
+        } else if ( selectingServer < 0 ) {
+            selectingServer = servers.length - 1
+        }
+        if ( data.indexOf("\u000d") === -1 ) {
+            const currentDate = new Date();
+            let text = " \x1b[2J\x1b[H\r\nWelcome to the Telamisu!\r\n" +
+            "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
+            "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n接続先のサーバーを選んでください。\r\n";
+            conn.write(iconv.encode(text, 'SJIS'))
+            for (let i = 0; i < servers.length; i++) {
+                if ( selectingServer === i ) {
+                    conn.write(iconv.encode(`>>> ${i}: ${servers[i]}\r\n`, 'SJIS'))
+                } else {
+                    conn.write(iconv.encode(`${i}: ${servers[i]}\r\n`, 'SJIS'))
+                }
+            }
+            conn.write(iconv.encode(`\r\n接続先を選択 I: ↑ | K: ↓ | Enter: 接続 | Q: 切断\r\n`, 'SJIS'))
+        }
+    } else if ( wsDisconnected == true ) {
         if ( data.indexOf("Y") !== -1 || data.indexOf("y") !== -1 ) {
             conn.write(iconv.encode('\r\n', 'SJIS'))
-            createWSConnection(conn)
+            createWSConnection(conn, true)
             wsDisconnected = false
         } else {
             conn.write(iconv.encode('\r\nWebSocketサーバーから切断されています。Yを押すと再接続します: ', 'SJIS'))
@@ -283,11 +358,11 @@ function processCmd(data, conn) {
                     isPostFinalCheck = false
                     isCmdMode = false
                     isNoteMode = false
-                    let notebody = JSON.stringify({ "i": token, text: noteText })
+                    let notebody = JSON.stringify({ "i": token, text: iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS') })
                     fetch(`https://${server_hostname}/api/notes/create`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": notebody }).then(async (data) => {
                         console.log(await data.text())
                     })
-                    noteText = ""
+                    currentWritingNoteArray = []
                     text = "\r\nノートは投稿されました。\r\n"
                     dispFourNote(conn)
                 } else {
@@ -296,28 +371,38 @@ function processCmd(data, conn) {
             }
             if ( !isPostFinalCheck && isCmdMode == true ) {
                 if ( data.indexOf("P") !== -1 || data.indexOf("p") !== -1 ) {
-                    text = "\x1Bc\r\nノートの投稿内容確認: 以下の内容で投稿します。\r\n###---ノートの始まり---###\r\n" + noteText + "\r\n###---ノートの終わり---###\r\n\r\n>>> よろしいですか？(Y/N): ", 'SJIS'
+                    text = " \x1b[2J\x1b[H\r\nノートの投稿内容確認: 以下の内容で投稿します。\r\n###---ノートの始まり---###\r\n" + iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS') + "\r\n###---ノートの終わり---###\r\n\r\n>>> よろしいですか？(Y/N): ", 'SJIS'
                     isPostFinalCheck = true
                 } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1 ) {
                     text = "\r\nノートの投稿を中止しました。\r\n"
                     isCmdMode = false
                     isNoteMode = false
-                    noteText = ""
+                    currentWritingNoteArray = []
                     dispFourNote(conn)
                 } else {
                     isCmdMode = false
                 }
             } else if ( !isPostFinalCheck && isCmdMode == false && isNoteMode == true ) {
-                if ( data.indexOf("\u0008") !== -1 ) {
-                    noteText = noteText.slice(0, -1)
+                if ( data.indexOf("\u0008") !== -1 ||  data.indexOf("\u007f") !== -1 ) {
+                    console.log("backspace or del detected")
+                    // SJISの文字コードで書かれたバッファをUTF-8に変換して、一文字削除する
+                    const SJISDecodedDelAfter = iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS').slice(0, -1)
+                    // UTF-8に変換して処理したstringを、SJISにエンコードしてバッファに変換する
+                    currentWritingNoteArray = Buffer.from(iconv.encode(SJISDecodedDelAfter, 'SJIS')).toJSON().data
+                } else if ( data === "\r" ) { 
+                    console.log("break detected")
+                    currentWritingNoteArray = currentWritingNoteArray.concat([13, 10])
                 } else if ( data.indexOf("\u001B") !== -1 ){
                     text = "\r\n>>> 投稿(P) / 破棄して戻る(Q) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: "
                     isCmdMode = true
                 } else {
-                    noteText = noteText + iconv.decode(Buffer.from(data, 'binary'), 'SJIS')
+                    currentWritingNoteArray = currentWritingNoteArray.concat(data.toJSON().data)
+                    console.log(currentWritingNoteArray)
+                    console.log(data.toJSON().data)
                 }
-                conn.write(iconv.encode('\x1Bc', 'SJIS'))
-                conn.write(iconv.encode(noteText, 'SJIS'))
+                console.log(iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS'))
+                conn.write(iconv.encode(' \x1b[2J\x1b[H', 'SJIS'))
+                conn.write(Buffer.from(currentWritingNoteArray, 'binary'))
             }
         } else if ( isSelectMode ) {
             if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
@@ -330,13 +415,13 @@ function processCmd(data, conn) {
                 text = "\r\n選択モードを終了しました。\r\n"
                 isCmdMode = false
                 isSelectMode = false
-                noteText = ""
+                currentWritingNoteArray = []
                 dispFourNote(conn)
             }
             if ( selectingNoteNum > noteArray.length - 1 ) {
-                selectingNoteNum = noteArray.length - 1
-            } else if ( selectingNoteNum < 0 ) {
                 selectingNoteNum = 0
+            } else if ( selectingNoteNum < 0 ) {
+                selectingNoteNum = noteArray.length - 1
             } 
             if ( data.indexOf("\u001B") === -1 ) {
                 dispFourNote(conn, selectingNoteNum, true)
@@ -362,7 +447,7 @@ function processCmd(data, conn) {
                 conn.destroy()
                 isNoteMode = false
                 isPostFinalCheck = false
-                noteText = ""
+                currentWritingNoteArray = []
                 isCmdMode = false
                 isSelectMode = false
             } else if ( data.indexOf("D") !== -1 || data.indexOf("d") !== -1 ) {
@@ -404,29 +489,32 @@ var server = net
     const clientId = crypto.randomUUID();
     tcpClients[clientId] = conn;
 
-    conn.write(iconv.encode("接続しています…", 'SJIS'));
+    isNoteMode = false
+    isPostFinalCheck = false
+    currentWritingNoteArray = []
+    isCmdMode = false
+    isSelectMode = false
 
     const currentDate = new Date();
-    conn.write(iconv.encode("ユーザー情報を取得しています…\r\n", 'SJIS'))
-    createWSConnection(conn).then(async (res) => {
-        if ( res ) {
-            const userinfo = await getUserInfo()
-            const connectedText = logoforcmd + 
-                "\r\nWELCOME TO TELAMISU! version: " + version + 
-                "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
-                "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
-                "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n" + 
-                "ユーザー名 " + userinfo.name + " (@" + userinfo.userName + ") としてログイン中です。\r\n" + 
-                "フォロワー: " + userinfo.followersCount + 
-                " | フォロー: " + userinfo.followingCount + 
-                " | ノート: " + userinfo.notesCount + 
-                "\r\n\r\nHave fun!\r\n"
-            const encodedConnectedText = iconv.encode(connectedText, 'SJIS')
-            conn.write(encodedConnectedText)
+    if ( bypassselectscreen ) {
+        conn.write(iconv.encode("接続しています…", 'SJIS'));
+        createWSConnection(conn)
+    } else {
+        isConnectionSelect = true
+        selectingServer = 0
+        let text = "\r\nWelcome to the Telamisu!\r\n" +
+            "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
+            "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n接続先のサーバーを選んでください。\r\n";
+        conn.write(iconv.encode(text, 'SJIS'))
+        for (let i = 0; i < servers.length; i++) {
+            if ( selectingServer === i ) {
+                conn.write(iconv.encode(`>>> ${i}: ${servers[i]}\r\n`, 'SJIS'))
+            } else {
+                conn.write(iconv.encode(`${i}: ${servers[i]}\r\n`, 'SJIS'))
+            }
         }
-    })
-
-
+        conn.write(iconv.encode(`\r\n接続先を選択 I: ↑ | K: ↓ | Enter: 接続 | Q: 切断\r\n`, 'SJIS'))
+    }
 })
 .listen(telnet_port);
 
