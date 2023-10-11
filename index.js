@@ -119,7 +119,7 @@ let currentWritingNoteArray = []
 let wsDisconnected = false
 let noteArray = []
 
-function createWSConnection(conn) {
+function createWSConnection(conn, suppressWelcomeText = false) {
     return new Promise((resolve, reject) => {
         if ( token ) {
             // Misskeyにチャンネルを識別させるためにUUIDを振る
@@ -206,22 +206,23 @@ function createWSConnection(conn) {
                 }));
                 conn.write(iconv.encode("\r\nチャンネル main に接続しました。", 'SJIS'));
                 conn.write(iconv.encode("\r\n接続しました。\r\n", 'SJIS'));
-
-                conn.write(iconv.encode("ユーザー情報を取得しています…\r\n", 'SJIS'))
-                const userinfo = await getUserInfo()
-                const currentDate = new Date()
-                const connectedText = logoforcmd + 
-                    "\r\nWELCOME TO TELAMISU! version: " + version + 
-                    "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
-                    "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
-                    "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n" + 
-                    "ユーザー名 " + userinfo.name + " (@" + userinfo.userName + ") としてログイン中です。\r\n" + 
-                    "フォロワー: " + userinfo.followersCount + 
-                    " | フォロー: " + userinfo.followingCount + 
-                    " | ノート: " + userinfo.notesCount + 
-                    "\r\n\r\nHave fun!\r\n"
-                const encodedConnectedText = iconv.encode(connectedText, 'SJIS')
-                conn.write(encodedConnectedText)
+                if ( !suppressWelcomeText ) {
+                    conn.write(iconv.encode("ユーザー情報を取得しています…\r\n", 'SJIS'))
+                    const userinfo = await getUserInfo()
+                    const currentDate = new Date()
+                    const connectedText = logoforcmd + 
+                        "\r\nWELCOME TO TELAMISU! version: " + version + 
+                        "\r\nあなたが現在接続しているサーバーは " + server_hostname + " です。\r\n" + 
+                        "TELNET(PORT " + telnet_port + ") で接続中です。\r\n" + 
+                        "現在時刻は " + currentDate.toLocaleString() + " です。\r\n\r\n" + 
+                        "ユーザー名 " + userinfo.name + " (@" + userinfo.userName + ") としてログイン中です。\r\n" + 
+                        "フォロワー: " + userinfo.followersCount + 
+                        " | フォロー: " + userinfo.followingCount + 
+                        " | ノート: " + userinfo.notesCount + 
+                        "\r\n\r\nHave fun!\r\n"
+                    const encodedConnectedText = iconv.encode(connectedText, 'SJIS')
+                    conn.write(encodedConnectedText)
+                }
                 resolve(true)
             });
         } else {
@@ -345,7 +346,7 @@ function processCmd(data, conn) {
     } else if ( wsDisconnected == true ) {
         if ( data.indexOf("Y") !== -1 || data.indexOf("y") !== -1 ) {
             conn.write(iconv.encode('\r\n', 'SJIS'))
-            createWSConnection(conn)
+            createWSConnection(conn, true)
             wsDisconnected = false
         } else {
             conn.write(iconv.encode('\r\nWebSocketサーバーから切断されています。Yを押すと再接続します: ', 'SJIS'))
