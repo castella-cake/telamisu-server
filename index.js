@@ -64,9 +64,15 @@ function addToNoteArray(noteObj) {
     // タイプがリノートで、テキストが含まれていない ではないならプッシュする
     if ( !(noteObj.type === "renote" && !noteObj.text ) ) {
         noteArray.unshift(noteObj)
+        selectingNoteNum = selectingNoteNum + 1
     } else {
         return false 
     }
+}
+
+function appendNoteQueue() {
+    noteArray = noteArrayQueue.concat(noteArray)
+    noteArrayQueue = []
 }
 
 function noteObjToDisp(noteObj, noteNum = noteArray.length + 1) {
@@ -118,6 +124,10 @@ let selectingNoteNum = 0
 let currentWritingNoteArray = []
 let wsDisconnected = false
 let noteArray = []
+let noteArrayQueue = []
+let noteActionMode = 0
+let currentReactionArray = []
+let currentActionNoteObj = {}
 
 function createWSConnection(conn, suppressWelcomeText = false) {
     return new Promise((resolve, reject) => {
@@ -267,6 +277,7 @@ function replaceCrlf(str) {
 }
 
 function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
+    appendNoteQueue()
     // ループ数を決めるが、元々4個未満しかノートを取得してない場合はそれに合わせる
     let loopcount = 4
     if ( noteArray.length < 4 ) {
@@ -289,7 +300,7 @@ function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
     }
     
     if ( showNoteSelectUi ) {
-        textArray.push("ノート選択モード I: ↑ | K: ↓ | Escキーで終了" + (noteArray.length - offset) + " / " + noteArray.length + "\r\n")
+        textArray.push("ノート選択モード I: ↑ | K: ↓ | L: アクション | Esc: 終了 | " + (noteArray.length - offset) + " / " + noteArray.length + "\r\n")
         conn.write(iconv.encode(" \x1b[2J\x1b[H", 'SJIS'))
     }
     conn.write(iconv.encode(textArray.join(""), 'SJIS'));
@@ -363,6 +374,7 @@ function processCmd(data, conn) {
                         console.log(await data.text())
                     })
                     currentWritingNoteArray = []
+                    conn.write(iconv.encode('\r\n', 'SJIS'))
                     text = "\r\nノートは投稿されました。\r\n"
                     dispFourNote(conn)
                 } else {
@@ -374,6 +386,7 @@ function processCmd(data, conn) {
                     text = " \x1b[2J\x1b[H\r\nノートの投稿内容確認: 以下の内容で投稿します。\r\n###---ノートの始まり---###\r\n" + iconv.decode(Buffer.from(currentWritingNoteArray, 'binary'), 'SJIS') + "\r\n###---ノートの終わり---###\r\n\r\n>>> よろしいですか？(Y/N): ", 'SJIS'
                     isPostFinalCheck = true
                 } else if ( data.indexOf("Q") !== -1 || data.indexOf("q") !== -1 ) {
+                    conn.write(iconv.encode('\r\n', 'SJIS'))
                     text = "\r\nノートの投稿を中止しました。\r\n"
                     isCmdMode = false
                     isNoteMode = false
@@ -392,7 +405,7 @@ function processCmd(data, conn) {
                 } else if ( data === "\r" ) { 
                     console.log("break detected")
                     currentWritingNoteArray = currentWritingNoteArray.concat([13, 10])
-                } else if ( data.indexOf("\u001B") !== -1 ){
+                } else if ( data.indexOf("\u001B") !== -1 ) {
                     text = "\r\n>>> 投稿(P) / 破棄して戻る(Q) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: "
                     isCmdMode = true
                 } else {
@@ -405,27 +418,76 @@ function processCmd(data, conn) {
                 conn.write(Buffer.from(currentWritingNoteArray, 'binary'))
             }
         } else if ( isSelectMode ) {
-            if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
-                console.log("UP PRESSED: " + selectingNoteNum)
-                selectingNoteNum = selectingNoteNum + 1
-            } else if ( data.indexOf("K") !== -1 || data.indexOf("k") !== -1 ){
-                console.log("DOWN PRESSED: " + selectingNoteNum)
-                selectingNoteNum = selectingNoteNum - 1
-            } else if ( data.indexOf("\u001B") !== -1 ) {
-                text = "\r\n選択モードを終了しました。\r\n"
-                isCmdMode = false
-                isSelectMode = false
-                currentWritingNoteArray = []
-                dispFourNote(conn)
+            if ( noteActionMode === 1 ){
+                if ( data.indexOf("\u000d") !== -1 ) {
+                    //console.log("enter")
+                    let reactBody = JSON.stringify({ "i": token, reaction: ":" + iconv.decode(Buffer.from(currentReactionArray, 'binary'), 'SJIS') + "@.:", noteId: currentActionNoteObj.id })
+                    fetch(`https://${server_hostname}/api/notes/reactions/create`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": reactBody }).then(async (data) => {
+                        console.log(await data.text())
+                    })
+                    text = "\r\n" + currentActionNoteObj.id + " に リアクション :" + iconv.decode(Buffer.from(currentReactionArray, 'binary'), 'SJIS') + "@.: を送信しました\r\n" 
+                    currentActionNoteObj = {}
+                    noteActionMode = 0
+                    currentReactionArray = []
+                    isCmdMode = false
+                    dispFourNote(conn, selectingNoteNum, true)
+                } else if ( data.indexOf("\u0008") !== -1 ||  data.indexOf("\u007f") !== -1 ) {
+                    //console.log("backspace or del detected")
+                    // SJISの文字コードで書かれたバッファをUTF-8に変換して、一文字削除する
+                    const SJISDecodedDelAfter = iconv.decode(Buffer.from(currentReactionArray, 'binary'), 'SJIS').slice(0, -1)
+                    // UTF-8に変換して処理したstringを、SJISにエンコードしてバッファに変換する
+                    currentReactionArray = Buffer.from(iconv.encode(SJISDecodedDelAfter, 'SJIS')).toJSON().data
+                } else if ( data.indexOf("\u001B") !== -1 || data == "\u001B" ) {
+                    //console.log("quit")
+                    noteActionMode = 0
+                    currentReactionArray = []
+                    isCmdMode = false
+                    currentActionNoteObj = {}
+                    dispFourNote(conn, selectingNoteNum, true)
+                    text = "\r\n中止しました\r\n"
+                } else {
+                    //console.log("add")
+                    currentReactionArray = currentReactionArray.concat(data.toJSON().data)
+                }
+                console.log(Buffer.from(currentReactionArray, 'binary'))
+                if ( data.indexOf("\u000d") === -1 && data.indexOf("\u001B") === -1 && data != "\u001B" ) {
+                    conn.write(iconv.encode(" \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n送信するリアクションを入力 >", 'SJIS'))
+                    conn.write(Buffer.from(currentReactionArray, 'binary'))
+                }
+            } else if ( isCmdMode ) {
+                if ( data.indexOf("R") !== -1 || data.indexOf("r") !== -1 ){
+                    noteActionMode = 1
+                    text = " \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n送信するリアクションを入力 >"
+                } else {
+                    text = "\r\n中止しました\r\n"
+                    currentActionNoteObj = {}
+                }
+            } else {
+                if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
+                    selectingNoteNum = selectingNoteNum + 1
+                } else if ( data.indexOf("K") !== -1 || data.indexOf("k") !== -1 ){
+                    selectingNoteNum = selectingNoteNum - 1
+                } else if ( data.indexOf("L") !== -1 || data.indexOf("l") !== -1 ){
+                    isCmdMode = true
+                    currentActionNoteObj = JSON.parse(JSON.stringify(noteArray[selectingNoteNum]))
+                    text = "\r\nリアクション(R) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: \r\n"
+                } else if ( data.indexOf("\u001B") !== -1 ) {
+                    text = "\r\n選択モードを終了しました。\r\n"
+                    isCmdMode = false
+                    isSelectMode = false
+                    currentWritingNoteArray = []
+                    dispFourNote(conn)
+                }
+                if ( selectingNoteNum > noteArray.length - 1 ) {
+                    selectingNoteNum = 0
+                } else if ( selectingNoteNum < 0 ) {
+                    selectingNoteNum = noteArray.length - 1
+                } 
+                if ( data.indexOf("\u001B") === -1 ) {
+                    dispFourNote(conn, selectingNoteNum, true)
+                }
             }
-            if ( selectingNoteNum > noteArray.length - 1 ) {
-                selectingNoteNum = 0
-            } else if ( selectingNoteNum < 0 ) {
-                selectingNoteNum = noteArray.length - 1
-            } 
-            if ( data.indexOf("\u001B") === -1 ) {
-                dispFourNote(conn, selectingNoteNum, true)
-            }
+
         } else if ( isCmdMode == false ) {
             /* 通常受信中にコマンドモードに移行する */
             if ( data.indexOf("\u001B") !== -1 ) {
