@@ -256,18 +256,24 @@ function disconnectWS() {
 */
 
 function getUserStringFromUserObj(user, altseparator = false) {
+    let idstr = ""
+    let sepleft = ""
+    let sepright = ""
     if ( altseparator ) {
-        if ( user.host ) {
-            return user.name + " - @" + user.username + "@" + user.host
-        } else {
-            return user.name + " - @" + user.username
-        }
+        sepleft = " - "
     } else {
-        if ( user.host ) {
-            return user.name + " (@" + user.username + "@" + user.host + ")"
-        } else {
-            return user.name + " (@" + user.username + ")"
-        }
+        sepleft = " ("
+        sepright = ")"
+    }
+    if ( user.host ) {
+        idstr = "@" + user.username + "@" + user.host
+    } else {
+        idstr = "@" + user.username
+    }
+    if ( user.name ) {
+        return user.name + sepleft + idstr + sepright
+    } else {
+        return idstr
     }
 }
 
@@ -455,12 +461,23 @@ function processCmd(data, conn) {
                     conn.write(Buffer.from(currentReactionArray, 'binary'))
                 }
             } else if ( isCmdMode ) {
-                if ( data.indexOf("R") !== -1 || data.indexOf("r") !== -1 ){
+                if ( data.indexOf("A") !== -1 || data.indexOf("a") !== -1 ){
                     noteActionMode = 1
                     text = " \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n送信するリアクションを入力 >"
+                } else if ( data.indexOf("R") !== -1 || data.indexOf("r") !== -1 ){
+                    const renoteBody = { i: token, renoteId: currentActionNoteObj.id }
+                    fetch(`https://${server_hostname}/api/notes/create`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": JSON.stringify(renoteBody) }).then(async (data) => {
+                        console.log(await data.text())
+                    })
+                    text = "\r\nRenoteしました\r\n"
+                    currentActionNoteObj = {}
+                    isCmdMode = false
+                    dispFourNote(conn, selectingNoteNum, true)
                 } else {
                     text = "\r\n中止しました\r\n"
                     currentActionNoteObj = {}
+                    isCmdMode = false
+                    dispFourNote(conn, selectingNoteNum, true)
                 }
             } else {
                 if ( data.indexOf("I") !== -1 || data.indexOf("i") !== -1 ){
@@ -470,7 +487,7 @@ function processCmd(data, conn) {
                 } else if ( data.indexOf("L") !== -1 || data.indexOf("l") !== -1 ){
                     isCmdMode = true
                     currentActionNoteObj = JSON.parse(JSON.stringify(noteArray[selectingNoteNum]))
-                    text = "\r\nリアクション(R) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: \r\n"
+                    text = "\r\nリアクション(A) / リノート(R) \r\nコマンドモードをキャンセルするには Esc を押してください\r\n>>> コマンド: \r\n"
                 } else if ( data.indexOf("\u001B") !== -1 ) {
                     text = "\r\n選択モードを終了しました。\r\n"
                     isCmdMode = false
