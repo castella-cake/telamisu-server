@@ -37,6 +37,15 @@ function getUserInfo() {
     })
 }
 
+async function getEmojiInfo() {
+    const data = await fetch(`https://${server_hostname}/api/emojis`, {"headers": { "Content-Type": "application/json" }, "method": "POST", "body": "{}" })
+    const emojis = JSON.parse(await data.text()).emojis
+    const obj = {}
+    emojis.map(elem => { obj[elem.name] = { category: (elem.category ?? "null"), aliases: (elem.aliases ?? [])} })
+    //console.log(obj)
+    return obj
+}
+
 // ノートのオブジェクトから内容を簡潔にしたオブジェクトを生成するfunction
 // リノートに関してはあまり必要がないため、何も返しません
 function createNoteObj(note) {
@@ -128,6 +137,7 @@ let noteArrayQueue = []
 let noteActionMode = 0
 let currentReactionArray = []
 let currentActionNoteObj = {}
+let emojisObj = {}
 
 function createWSConnection(conn, suppressWelcomeText = false) {
     return new Promise((resolve, reject) => {
@@ -216,6 +226,9 @@ function createWSConnection(conn, suppressWelcomeText = false) {
                 }));
                 conn.write(iconv.encode("\r\nチャンネル main に接続しました。", 'SJIS'));
                 conn.write(iconv.encode("\r\n接続しました。\r\n", 'SJIS'));
+                conn.write(iconv.encode("絵文字情報を準備しています…\r\n", 'SJIS'))
+                emojisObj = await getEmojiInfo()
+                conn.write(iconv.encode( Object.keys(emojisObj).length + " 個の絵文字を取得しました。\r\n", 'SJIS'))
                 if ( !suppressWelcomeText ) {
                     conn.write(iconv.encode("ユーザー情報を取得しています…\r\n", 'SJIS'))
                     const userinfo = await getUserInfo()
@@ -312,7 +325,7 @@ function dispFourNote(conn, offset = 0, showNoteSelectUi = false) {
     conn.write(iconv.encode(textArray.join(""), 'SJIS'));
 } 
 
-function processCmd(data, conn) {
+async function processCmd(data, conn) {
     console.log(data)
     let text = ""
     if ( isConnectionSelect ) {
@@ -457,13 +470,24 @@ function processCmd(data, conn) {
                 }
                 console.log(Buffer.from(currentReactionArray, 'binary'))
                 if ( data.indexOf("\u000d") === -1 && data.indexOf("\u001B") === -1 && data != "\u001B" ) {
-                    conn.write(iconv.encode(" \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n送信するリアクションを入力 >", 'SJIS'))
+                    const emojiSuggestionArray = Object.keys(emojisObj).filter(elem => { 
+                        return elem.indexOf(iconv.decode(Buffer.from(currentReactionArray, 'binary'), 'SJIS')) !== -1 
+                    })
+                    const emojiSuggestionStr = emojiSuggestionArray.slice(0, 9).join(", ")
+                    conn.write(iconv.encode(" \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n" + currentActionNoteObj.reactionsList.join(" | ") + "\r\nもしかして(最初の10個): \r\n" + emojiSuggestionStr + "\r\n送信するリアクションを入力 >", 'SJIS'))
                     conn.write(Buffer.from(currentReactionArray, 'binary'))
                 }
             } else if ( isCmdMode ) {
                 if ( data.indexOf("A") !== -1 || data.indexOf("a") !== -1 ){
                     noteActionMode = 1
-                    text = " \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n送信するリアクションを入力 >"
+                    // ノート情報を取得してリアクションを取得し、CANOに入れておく
+                    const showBody = { i: token, noteId: currentActionNoteObj.id }
+                    const showRes = await fetch(`https://${server_hostname}/api/notes/show`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": JSON.stringify(showBody) })
+                    const reactionObj = JSON.parse(await showRes.text()).reactions
+                    currentActionNoteObj.reactionsList = []
+                    Object.keys(reactionObj).map(elem => currentActionNoteObj.reactionsList.push(`${elem} ${reactionObj[elem]}`))
+                    console.log(reactionObj)
+                    text = " \x1b[2J\x1b[H ===============================\r\n" + noteObjToDisp(currentActionNoteObj, noteArray.length - selectingNoteNum) + "\r\n===============================\r\nノートID " + currentActionNoteObj.id + " にリアクションを送信します(Escキーでキャンセル)\r\n" + currentActionNoteObj.reactionsList.join(" | ") + "\r\n送信するリアクションを入力 >"
                 } else if ( data.indexOf("R") !== -1 || data.indexOf("r") !== -1 ){
                     const renoteBody = { i: token, renoteId: currentActionNoteObj.id }
                     fetch(`https://${server_hostname}/api/notes/create`, { "headers": { "Content-Type": "application/json" }, "method": "POST", "body": JSON.stringify(renoteBody) }).then(async (data) => {
